@@ -15,4 +15,4 @@ In this module, you’ll configure your local environment, explore core solar-en
 
 1. **Clone the repository**  
    ```bash
-   git clone https://github.com/<your-username>/solar-challenge-week1.git
+   git clone https://github.com/boaztulu/solar-challenge-week1.git
