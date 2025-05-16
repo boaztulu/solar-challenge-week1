@@ -1,0 +1,11 @@
+# Ignore data folder
+data/
+
+# Ignore CSV files
+*.csv
+
+# Ignore Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore virtual environment folder (if named 'venv')
+venv/
