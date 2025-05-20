@@ -1,119 +1,120 @@
 """
-Reusable helpers for the Solar Dashboard
-----------------------------------------
-
-All heavy lifting (loading, aggregations, plots, stats) lives here so
-`main.py` stays tidy.  Every function takes a dataframe that already
-contains all three countries plus a `Country` column.
+Utility helpers for the Solar Dashboard
+---------------------------------------
+• Finds every *-clean.csv inside any data/cleaned/ directory
+  beneath the repo or app folder.
+• Caches heavy plots so reruns are fast.
 """
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Dict
 
-import pandas as pd
+import streamlit as st
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from windrose import WindroseAxes
 
 
-# ------------------------------------------------------------------ #
-# Data I/O
-# ------------------------------------------------------------------ #
+# ──────────────────────────────────────────────────────────────────────────────
+# 1. Data I/O
+# ──────────────────────────────────────────────────────────────────────────────
+@st.cache_data(show_spinner=False, ttl=600)
 def load_data() -> pd.DataFrame:
-    """Load cleaned CSVs, tag by country, and concatenate."""
-    data_path = Path(__file__).parent.parent / "data" / "cleaned"
-    files = {
-        "Benin": data_path / "benin-clean.csv",
-        "Sierra Leone": data_path / "sierraleone-clean.csv",
-        "Togo": data_path / "togo-clean.csv",
-    }
+    """
+    Scan for *.csv whose name ends with '-clean.csv' inside any data/cleaned/
+    folder below the project.  Adds a Country column (title-cased stem before
+    '-clean') and concatenates them.
+
+    Returns
+    -------
+    pd.DataFrame (possibly empty if no files found)
+    """
+    root = Path(__file__).resolve().parent.parent  # repo root
+    candidates: List[Path] = []
+
+    # search two typical spots: repo/data/cleaned and anywhere deeper
+    for dirpath in (root / "data" / "cleaned").rglob("*.csv"):
+        candidates.append(dirpath)
+    for dirpath in root.rglob("data/cleaned/*.csv"):
+        if dirpath not in candidates:
+            candidates.append(dirpath)
+
     frames = []
-    for name, fpath in files.items():
-        df = pd.read_csv(fpath, parse_dates=["Timestamp"], infer_datetime_format=True)
-        df["Country"] = name
+    for csv in candidates:
+        if not csv.name.endswith("-clean.csv"):
+            continue
+        country = csv.stem.replace("-clean", "").replace("_", " ").title()
+        try:
+            df = pd.read_csv(csv, parse_dates=["Timestamp"], infer_datetime_format=True)
+        except Exception as exc:
+            st.warning(f"⚠️  Skipping {csv.name}: {exc}")
+            continue
+        df["Country"] = country
         frames.append(df)
-    return pd.concat(frames, ignore_index=True)
+
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-# ------------------------------------------------------------------ #
-# EDA utilities
-# ------------------------------------------------------------------ #
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. Quick EDA helpers
+# ──────────────────────────────────────────────────────────────────────────────
 def summary_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Return describe() plus null counts & % for numeric columns."""
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    desc = df[numeric_cols].describe().T
-    # null information
-    nulls = df[numeric_cols].isna().sum()
+    numeric = df.select_dtypes(include=[np.number])
+    desc = numeric.describe().T
+    nulls = numeric.isna().sum()
     desc["Missing #"] = nulls
-    desc["Missing %"] = (nulls / len(df)).round(3) * 100
+    desc["Missing %"] = (nulls / len(df) * 100).round(2)
     return desc.reset_index().rename(columns={"index": "Column"})
 
 
+@st.cache_data(show_spinner=False)
 def missing_heatmap(df: pd.DataFrame) -> plt.Figure:
-    """Heat-map of missing values."""
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.heatmap(df.isna(), cbar=False, ax=ax)
     ax.set_title("Missing-value pattern")
-    ax.set_xlabel("Columns")
-    ax.set_ylabel("Rows")
     return fig
 
 
-def zscore_outliers(df: pd.DataFrame,
-                    cols: List[str],
-                    threshold: float = 3.0) -> Tuple[pd.DataFrame, pd.Series]:
-    """
-    Flag outliers using |Z| > threshold and return:
-    (cleaned_dataframe, boolean_mask_of_outliers)
-    """
-    z = np.abs(stats.zscore(df[cols], nan_policy="omit"))
-    mask = (z > threshold).any(axis=1)
-    cleaned = df[~mask].copy()
-    return cleaned, mask
-
-
-# ------------------------------------------------------------------ #
-# Plot helpers (each returns a matplotlib Figure ready for st.pyplot)
-# ------------------------------------------------------------------ #
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. Cached plot builders
+# ──────────────────────────────────────────────────────────────────────────────
+@st.cache_data(show_spinner=False)
 def time_series(df: pd.DataFrame, metric: str) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(9, 4))
     sns.lineplot(data=df, x="Timestamp", y=metric, hue="Country", ax=ax)
-    ax.set_title(f"{metric} over time")
     ax.set_ylabel(f"{metric} (W/m²)")
-    ax.legend(title="Country")
+    ax.set_title(f"{metric} over time")
     return fig
 
 
-def correlation_heatmap(df: pd.DataFrame,
-                        metrics: List[str]) -> plt.Figure:
-    corr = df[metrics].corr()
+@st.cache_data(show_spinner=False)
+def correlation_heatmap(df: pd.DataFrame, cols: List[str]) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(6, 4))
-    sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax)
+    sns.heatmap(df[cols].corr(), annot=True, cmap="coolwarm", ax=ax)
     ax.set_title("Correlation matrix")
     return fig
 
 
-def scatter_plot(df: pd.DataFrame,
-                 x: str,
-                 y: str,
-                 hue: str = "Country") -> plt.Figure:
+@st.cache_data(show_spinner=False)
+def scatter_plot(df: pd.DataFrame, x: str, y: str) -> plt.Figure:
     fig, ax = plt.subplots()
-    sns.scatterplot(data=df, x=x, y=y, hue=hue, ax=ax, alpha=.6)
-    ax.set_title(f"{y} vs. {x}")
+    sns.scatterplot(data=df, x=x, y=y, hue="Country", alpha=.6, ax=ax)
+    ax.set_title(f"{y} vs {x}")
     return fig
 
 
-def wind_rose(df: pd.DataFrame,
-              ws_col: str = "WS",
-              wd_col: str = "WD") -> plt.Figure:
+@st.cache_data(show_spinner=False)
+def wind_rose(df: pd.DataFrame, ws: str = "WS", wd: str = "WD") -> plt.Figure:
     fig = plt.figure(figsize=(4, 4))
     ax = WindroseAxes.from_ax(fig=fig)
-    ax.bar(df[wd_col], df[ws_col], normed=True, opening=0.8, edgecolor="white")
+    ax.bar(df[wd], df[ws], normed=True, opening=0.8, edgecolor="white")
     ax.set_legend()
     return fig
 
 
+@st.cache_data(show_spinner=False)
 def histogram(df: pd.DataFrame, col: str) -> plt.Figure:
     fig, ax = plt.subplots()
     sns.histplot(df[col].dropna(), kde=True, ax=ax)
@@ -121,34 +122,35 @@ def histogram(df: pd.DataFrame, col: str) -> plt.Figure:
     return fig
 
 
-def bubble_chart(df: pd.DataFrame,
-                 x: str = "GHI",
-                 y: str = "Tamb",
-                 size: str = "RH") -> plt.Figure:
+@st.cache_data(show_spinner=False)
+def bubble_chart(df: pd.DataFrame) -> plt.Figure:
     fig, ax = plt.subplots()
-    sns.scatterplot(data=df, x=x, y=y, size=size,
-                    hue="Country", sizes=(20, 400), alpha=.6, ax=ax)
-    ax.set_title(f"{y} vs {x} (bubble ~ {size})")
+    sns.scatterplot(
+        data=df,
+        x="GHI",
+        y="Tamb",
+        size="RH",
+        hue="Country",
+        sizes=(20, 400),
+        alpha=.6,
+        ax=ax,
+    )
+    ax.set_title("Tamb vs GHI (bubble ~ RH)")
     return fig
 
 
-# ------------------------------------------------------------------ #
-# Cross-country statistics
-# ------------------------------------------------------------------ #
+# ──────────────────────────────────────────────────────────────────────────────
+# 4. Cross-country stats
+# ──────────────────────────────────────────────────────────────────────────────
 def compare_stats(df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
-    """Return mean, median, std for each metric by country."""
-    out = []
+    rows = []
     for m in metrics:
-        stats_df = df.groupby("Country")[m].agg(["mean", "median", "std"])
-        stats_df["Metric"] = m
-        out.append(stats_df.reset_index())
-    return pd.concat(out, ignore_index=True)[
-        ["Metric", "Country", "mean", "median", "std"]
-    ]
+        grp = df.groupby("Country")[m].agg(["mean", "median", "std"]).reset_index()
+        grp.insert(1, "Metric", m)
+        rows.append(grp)
+    return pd.concat(rows, ignore_index=True)
 
 
 def one_way_anova(df: pd.DataFrame, metric: str) -> float:
-    """Return p-value from ANOVA across countries on the given metric."""
-    groups = [g[metric].dropna().values for _, g in df.groupby("Country")]
-    fstat, pval = stats.f_oneway(*groups)
-    return pval
+    groups = [g[metric].dropna() for _, g in df.groupby("Country")]
+    return stats.f_oneway(*groups).pvalue

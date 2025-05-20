@@ -16,116 +16,112 @@ from utils import (
     one_way_anova,
 )
 
-sns.set_style("whitegrid")  # consistent look
-
+sns.set_style("whitegrid")
 st.set_page_config(
     page_title="Solar Irradiance Dashboard",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# -------------------------------------------------------------
-# Sidebar – global filters
-# -------------------------------------------------------------
-df = load_data()
-
-all_countries = sorted(df["Country"].unique())
-selected_countries = st.sidebar.multiselect(
-    "Select country (or countries):",
-    options=all_countries,
-    default=all_countries,
+st.sidebar.info(
+    "CSV files should be named **`*-clean.csv`** and live in any "
+    "`data/cleaned/` folder inside the repo."
 )
 
-if not selected_countries:
-    st.warning("Please select at least one country.")
+# ──────────────────────────────────────────────────────────────────────────────
+# Load data
+# ──────────────────────────────────────────────────────────────────────────────
+df = load_data()
+
+if df.empty:
+    st.title("Solar Irradiance Dashboard")
+    st.warning(
+        "❗ No `*-clean.csv` files found under any data/cleaned/ directory.\n\n"
+        "Commit or upload your cleaned datasets and redeploy."
+    )
     st.stop()
 
-df = df[df["Country"].isin(selected_countries)]
+# Country filter
+selected = st.sidebar.multiselect(
+    "Filter countries:",
+    options=df["Country"].unique().tolist(),
+    default=df["Country"].unique().tolist(),
+)
+df = df[df["Country"].isin(selected)]
+if df.empty:
+    st.warning("No data after filtering.")
+    st.stop()
 
-# Tabs for Task-2 EDA and Task-3 Comparison
+# ──────────────────────────────────────────────────────────────────────────────
+# Tabs
+# ──────────────────────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["📊 EDA (per country)", "🌍 Cross-country"])
 
-# -------------------------------------------------------------
-# TAB 1 – EDA
-# -------------------------------------------------------------
+# ----------------------------  TAB 1  ---------------------------------------
 with tab1:
     st.header("Exploratory Data Analysis")
 
-    # ---- Stats & Missing Report ----
     st.subheader("Summary statistics")
     st.dataframe(summary_stats(df), use_container_width=True)
 
     st.subheader("Missing-value pattern")
     st.pyplot(missing_heatmap(df))
 
-    # ---- Plot selector ----
-    eda_plot = st.selectbox(
-        "Choose an EDA plot type:",
+    plot_choice = st.selectbox(
+        "Choose a plot type:",
         (
             "Time series",
             "Correlation heatmap",
-            "Scatter (WS vs. GHI)",
+            "Scatter (WS vs GHI)",
             "Wind rose",
             "Histogram (GHI)",
             "Bubble chart (GHI vs Tamb, bubble RH)",
         ),
     )
 
-    if eda_plot == "Time series":
+    if plot_choice == "Time series":
         metric = st.selectbox("Metric:", ("GHI", "DNI", "DHI", "Tamb"))
         st.pyplot(time_series(df, metric))
-
-    elif eda_plot == "Correlation heatmap":
+    elif plot_choice == "Correlation heatmap":
         st.pyplot(correlation_heatmap(df, ["GHI", "DNI", "DHI", "Tamb", "TModA", "TModB"]))
-
-    elif eda_plot == "Scatter (WS vs. GHI)":
+    elif plot_choice == "Scatter (WS vs GHI)":
         st.pyplot(scatter_plot(df, "WS", "GHI"))
-
-    elif eda_plot == "Wind rose":
+    elif plot_choice == "Wind rose":
         st.pyplot(wind_rose(df))
-
-    elif eda_plot == "Histogram (GHI)":
+    elif plot_choice == "Histogram (GHI)":
         st.pyplot(histogram(df, "GHI"))
-
-    else:  # bubble chart
+    else:
         st.pyplot(bubble_chart(df))
 
-# -------------------------------------------------------------
-# TAB 2 – Cross-country comparison
-# -------------------------------------------------------------
+# ----------------------------  TAB 2  ---------------------------------------
 with tab2:
-    st.header("Cross-country Comparison")
+    st.header("Cross-country comparison")
 
     metric = st.selectbox("Metric for boxplot:", ("GHI", "DNI", "DHI"))
 
-    # ---- Boxplot ----
     st.subheader(f"{metric} distribution by country")
     fig, ax = plt.subplots(figsize=(7, 4))
     sns.boxplot(x="Country", y=metric, data=df, palette="Set2", ax=ax)
     st.pyplot(fig)
 
-    # ---- Summary table ----
     st.subheader("Summary (mean / median / std)")
     st.dataframe(compare_stats(df, [metric]), use_container_width=True)
 
-    # ---- ANOVA ----
     pval = one_way_anova(df, metric)
     st.markdown(
-        f"**One-way ANOVA p-value:** `{pval:.4g}`  "
+        f"**One-way ANOVA p-value:** `{pval:.4g}` "
         + ("(significant 🤔)" if pval < 0.05 else "(not significant)")
     )
 
-    # ---- Ranking bar ----
-    st.subheader("Average GHI ranking (all data)")
-    avg_ghi = (
+    st.subheader("Average GHI ranking")
+    avg = (
         df.groupby("Country")["GHI"]
         .mean()
         .sort_values(ascending=False)
         .reset_index(name="Mean GHI")
     )
     fig2, ax2 = plt.subplots(figsize=(5, 3))
-    sns.barplot(x="Mean GHI", y="Country", data=avg_ghi, palette="viridis", ax=ax2)
+    sns.barplot(x="Mean GHI", y="Country", data=avg, palette="viridis", ax=ax2)
     st.pyplot(fig2)
 
-# -------------------------------------------------------------
 st.caption("© 2025 Solar Challenge — Streamlit Dashboard")
