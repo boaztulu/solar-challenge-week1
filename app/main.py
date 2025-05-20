@@ -33,13 +33,15 @@ uploader_dict = {
     "Togo": st.sidebar.file_uploader("Togo CSV", type="csv"),
 }
 
-try:
-    df = load_data(uploader_dict)
-except ValueError:
-    st.warning("Please upload at least one cleaned CSV to proceed.")
+if not any(uploader_dict.values()):
+    st.title("Solar Irradiance Dashboard")
+    st.markdown("⬅️ **Upload at least one cleaned CSV in the sidebar to begin.**")
     st.stop()
 
-# Country filter (after upload)
+with st.spinner("Loading & merging CSVs…"):
+    df = load_data(uploader_dict)
+
+# Country filter
 selected = st.sidebar.multiselect(
     "Filter countries:",
     options=df["Country"].unique().tolist(),
