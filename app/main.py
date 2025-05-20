@@ -2,7 +2,7 @@ import streamlit as st
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from app.utils import (
+from utils import (
     load_data,
     summary_stats,
     missing_heatmap,
