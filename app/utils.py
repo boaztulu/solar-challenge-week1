@@ -1,13 +1,11 @@
 """
 Utility helpers for the Solar Dashboard
 ---------------------------------------
-All heavy lifting (loading, aggregations, plots, stats) lives here so
-main.py stays tidy.
+Loads cleaned CSVs from data/cleaned, aggregates, and provides cached plot
+functions to keep main.py tidy.
 """
-from io import BytesIO
-from typing import Dict, List, Tuple
-
 from pathlib import Path
+from typing import List
 
 import streamlit as st
 import numpy as np
@@ -22,30 +20,22 @@ from windrose import WindroseAxes
 # Data I/O
 # ──────────────────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=600)
-def load_data(file_dict: Dict[str, BytesIO | Path]) -> pd.DataFrame:
+def load_data() -> pd.DataFrame:
     """
-    Concatenate user-uploaded CSVs and add a Country column.
-
-    Parameters
-    ----------
-    file_dict : dict
-        Keys = country names, values = file-like objects from st.file_uploader
-        or Path objects on disk.
-
-    Returns
-    -------
-    pd.DataFrame
+    Read benin-clean.csv, sierraleone-clean.csv, togo-clean.csv from
+    data/cleaned/ and concatenate with a Country column.
     """
-    frames: list[pd.DataFrame] = []
-    for country, fh in file_dict.items():
-        if fh is None:
-            continue
-        df = pd.read_csv(fh, parse_dates=["Timestamp"], infer_datetime_format=True)
+    data_path = Path(__file__).parent.parent / "data" / "cleaned"
+    files = {
+        "Benin": data_path / "benin-clean.csv",
+        "Sierra Leone": data_path / "sierraleone-clean.csv",
+        "Togo": data_path / "togo-clean.csv",
+    }
+    frames = []
+    for country, path in files.items():
+        df = pd.read_csv(path, parse_dates=["Timestamp"], infer_datetime_format=True)
         df["Country"] = country
         frames.append(df)
-
-    if not frames:
-        raise ValueError("No CSVs supplied")
 
     return pd.concat(frames, ignore_index=True)
 
@@ -54,11 +44,11 @@ def load_data(file_dict: Dict[str, BytesIO | Path]) -> pd.DataFrame:
 # Quick EDA helpers
 # ──────────────────────────────────────────────────────────────────────────────
 def summary_stats(df: pd.DataFrame) -> pd.DataFrame:
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    desc = df[numeric_cols].describe().T
-    nulls = df[numeric_cols].isna().sum()
+    numeric = df.select_dtypes(include=[np.number])
+    desc = numeric.describe().T
+    nulls = numeric.isna().sum()
     desc["Missing #"] = nulls
-    desc["Missing %"] = (nulls / len(df)).round(3) * 100
+    desc["Missing %"] = (nulls / len(df) * 100).round(2)
     return desc.reset_index().rename(columns={"index": "Column"})
 
 
@@ -77,15 +67,15 @@ def missing_heatmap(df: pd.DataFrame) -> plt.Figure:
 def time_series(df: pd.DataFrame, metric: str) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(9, 4))
     sns.lineplot(data=df, x="Timestamp", y=metric, hue="Country", ax=ax)
-    ax.set_title(f"{metric} over time")
     ax.set_ylabel(f"{metric} (W/m²)")
+    ax.set_title(f"{metric} over time")
     return fig
 
 
 @st.cache_data(show_spinner=False)
-def correlation_heatmap(df: pd.DataFrame, metrics: List[str]) -> plt.Figure:
+def correlation_heatmap(df: pd.DataFrame, cols: List[str]) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(6, 4))
-    sns.heatmap(df[metrics].corr(), annot=True, cmap="coolwarm", ax=ax)
+    sns.heatmap(df[cols].corr(), annot=True, cmap="coolwarm", ax=ax)
     ax.set_title("Correlation matrix")
     return fig
 
@@ -93,16 +83,16 @@ def correlation_heatmap(df: pd.DataFrame, metrics: List[str]) -> plt.Figure:
 @st.cache_data(show_spinner=False)
 def scatter_plot(df: pd.DataFrame, x: str, y: str) -> plt.Figure:
     fig, ax = plt.subplots()
-    sns.scatterplot(data=df, x=x, y=y, hue="Country", alpha=0.6, ax=ax)
+    sns.scatterplot(data=df, x=x, y=y, hue="Country", alpha=.6, ax=ax)
     ax.set_title(f"{y} vs {x}")
     return fig
 
 
 @st.cache_data(show_spinner=False)
-def wind_rose(df: pd.DataFrame, ws_col: str = "WS", wd_col: str = "WD") -> plt.Figure:
+def wind_rose(df: pd.DataFrame, ws: str = "WS", wd: str = "WD") -> plt.Figure:
     fig = plt.figure(figsize=(4, 4))
     ax = WindroseAxes.from_ax(fig=fig)
-    ax.bar(df[wd_col], df[ws_col], normed=True, opening=0.8, edgecolor="white")
+    ax.bar(df[wd], df[ws], normed=True, opening=0.8, edgecolor="white")
     ax.set_legend()
     return fig
 
@@ -125,7 +115,7 @@ def bubble_chart(df: pd.DataFrame) -> plt.Figure:
         size="RH",
         hue="Country",
         sizes=(20, 400),
-        alpha=0.6,
+        alpha=.6,
         ax=ax,
     )
     ax.set_title("Tamb vs GHI (bubble ~ RH)")
@@ -138,9 +128,9 @@ def bubble_chart(df: pd.DataFrame) -> plt.Figure:
 def compare_stats(df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
     rows = []
     for m in metrics:
-        s = df.groupby("Country")[m].agg(["mean", "median", "std"]).reset_index()
-        s.insert(1, "Metric", m)
-        rows.append(s)
+        grp = df.groupby("Country")[m].agg(["mean", "median", "std"]).reset_index()
+        grp.insert(1, "Metric", m)
+        rows.append(grp)
     return pd.concat(rows, ignore_index=True)
 
 
