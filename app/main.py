@@ -1,116 +1,131 @@
-#this is comment
 import streamlit as st
-import pandas as pd
-import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-from pathlib import Path
 
-# Set up Streamlit page config
+from utils import (
+    load_data,
+    summary_stats,
+    missing_heatmap,
+    time_series,
+    correlation_heatmap,
+    scatter_plot,
+    wind_rose,
+    histogram,
+    bubble_chart,
+    compare_stats,
+    one_way_anova,
+)
+
+sns.set_style("whitegrid")  # consistent look
+
 st.set_page_config(
-    page_title="Solar Dashboard",
+    page_title="Solar Irradiance Dashboard",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ----------------------------------------
-# 1) Load data function
-# ----------------------------------------
-@st.cache_data
-def load_data():
-    """
-    Loads cleaned CSVs for Benin, Sierra Leone, and Togo (or more if desired).
-    Returns a single combined DataFrame with a 'Country' column.
-    """
-    data_path = Path(__file__).parent.parent / "data" / "cleaned"
+# -------------------------------------------------------------
+# Sidebar – global filters
+# -------------------------------------------------------------
+df = load_data()
 
-    # CSV paths
-    benin_path        = data_path / "benin-clean.csv"
-    sierraleone_path  = data_path / "sierraleone-clean.csv"
-    togo_path         = data_path / "togo-clean.csv"
+all_countries = sorted(df["Country"].unique())
+selected_countries = st.sidebar.multiselect(
+    "Select country (or countries):",
+    options=all_countries,
+    default=all_countries,
+)
 
-    # Load
-    df_benin        = pd.read_csv(benin_path)
-    df_sierraleone  = pd.read_csv(sierraleone_path)
-    df_togo         = pd.read_csv(togo_path)
+if not selected_countries:
+    st.warning("Please select at least one country.")
+    st.stop()
 
-    # Tag each dataset
-    df_benin['Country']        = 'Benin'
-    df_sierraleone['Country']  = 'Sierra Leone'
-    df_togo['Country']         = 'Togo'
+df = df[df["Country"].isin(selected_countries)]
 
-    # Combine
-    combined_df = pd.concat([df_benin, df_sierraleone, df_togo], ignore_index=True)
-    return combined_df
+# Tabs for Task-2 EDA and Task-3 Comparison
+tab1, tab2 = st.tabs(["📊 EDA (per country)", "🌍 Cross-country"])
 
-# ----------------------------------------
-# 2) Main App
-# ----------------------------------------
-def main():
-    st.title("Solar Irradiance Dashboard")
+# -------------------------------------------------------------
+# TAB 1 – EDA
+# -------------------------------------------------------------
+with tab1:
+    st.header("Exploratory Data Analysis")
 
-    # Load data
-    df = load_data()
+    # ---- Stats & Missing Report ----
+    st.subheader("Summary statistics")
+    st.dataframe(summary_stats(df), use_container_width=True)
 
-    # Sidebar: Country Selection
-    all_countries = sorted(df['Country'].unique())
-    selected_countries = st.sidebar.multiselect(
-        "Select country (or countries):",
-        options=all_countries,
-        default=all_countries  # default: all
+    st.subheader("Missing-value pattern")
+    st.pyplot(missing_heatmap(df))
+
+    # ---- Plot selector ----
+    eda_plot = st.selectbox(
+        "Choose an EDA plot type:",
+        (
+            "Time series",
+            "Correlation heatmap",
+            "Scatter (WS vs. GHI)",
+            "Wind rose",
+            "Histogram (GHI)",
+            "Bubble chart (GHI vs Tamb, bubble RH)",
+        ),
     )
 
-    # Filter data based on selection
-    if len(selected_countries) == 0:
-        st.warning("No country selected. Please select at least one.")
-        return
+    if eda_plot == "Time series":
+        metric = st.selectbox("Metric:", ("GHI", "DNI", "DHI", "Tamb"))
+        st.pyplot(time_series(df, metric))
 
-    filtered_df = df[df['Country'].isin(selected_countries)]
+    elif eda_plot == "Correlation heatmap":
+        st.pyplot(correlation_heatmap(df, ["GHI", "DNI", "DHI", "Tamb", "TModA", "TModB"]))
 
-    # Metric selection
-    metrics = ["GHI", "DNI", "DHI"]
-    selected_metric = st.sidebar.selectbox(
-        "Select a metric for boxplot:",
-        options=metrics,
-        index=0
-    )
+    elif eda_plot == "Scatter (WS vs. GHI)":
+        st.pyplot(scatter_plot(df, "WS", "GHI"))
 
-    # ----------------------------------------
-    # Boxplot of chosen metric
-    # ----------------------------------------
-    st.subheader(f"Boxplot: {selected_metric}")
-    fig, ax = plt.subplots(figsize=(8, 4))
-    sns.boxplot(
-        x="Country",
-        y=selected_metric,
-        data=filtered_df,
-        palette="Set2"
-    )
-    ax.set_title(f"{selected_metric} Distribution by Country")
-    ax.set_ylabel(f"{selected_metric} (W/m²)")
+    elif eda_plot == "Wind rose":
+        st.pyplot(wind_rose(df))
+
+    elif eda_plot == "Histogram (GHI)":
+        st.pyplot(histogram(df, "GHI"))
+
+    else:  # bubble chart
+        st.pyplot(bubble_chart(df))
+
+# -------------------------------------------------------------
+# TAB 2 – Cross-country comparison
+# -------------------------------------------------------------
+with tab2:
+    st.header("Cross-country Comparison")
+
+    metric = st.selectbox("Metric for boxplot:", ("GHI", "DNI", "DHI"))
+
+    # ---- Boxplot ----
+    st.subheader(f"{metric} distribution by country")
+    fig, ax = plt.subplots(figsize=(7, 4))
+    sns.boxplot(x="Country", y=metric, data=df, palette="Set2", ax=ax)
     st.pyplot(fig)
 
-    # ----------------------------------------
-    # Table of top-average-GHI countries
-    # ----------------------------------------
-    st.subheader("Countries Ranked by Average GHI")
-    avg_ghi = (
-        df.groupby('Country')['GHI']
-          .mean()
-          .sort_values(ascending=False)
-          .reset_index(name="Mean GHI")
+    # ---- Summary table ----
+    st.subheader("Summary (mean / median / std)")
+    st.dataframe(compare_stats(df, [metric]), use_container_width=True)
+
+    # ---- ANOVA ----
+    pval = one_way_anova(df, metric)
+    st.markdown(
+        f"**One-way ANOVA p-value:** `{pval:.4g}`  "
+        + ("(significant 🤔)" if pval < 0.05 else "(not significant)")
     )
-    st.table(avg_ghi)
 
-    # ----------------------------------------
-    # Additional optional elements
-    # ----------------------------------------
-    st.markdown("""
-    **Observations**:  
-    - Choose different countries in the sidebar to see how the boxplots change.  
-    - The table above shows overall average GHI across all data points per country.  
-    - Add more interactive plots or summary stats to extend functionality.
-    """)
+    # ---- Ranking bar ----
+    st.subheader("Average GHI ranking (all data)")
+    avg_ghi = (
+        df.groupby("Country")["GHI"]
+        .mean()
+        .sort_values(ascending=False)
+        .reset_index(name="Mean GHI")
+    )
+    fig2, ax2 = plt.subplots(figsize=(5, 3))
+    sns.barplot(x="Mean GHI", y="Country", data=avg_ghi, palette="viridis", ax=ax2)
+    st.pyplot(fig2)
 
-if __name__ == "__main__":
-    main()
+# -------------------------------------------------------------
+st.caption("© 2025 Solar Challenge — Streamlit Dashboard")
