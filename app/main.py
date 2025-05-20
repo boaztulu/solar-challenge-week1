@@ -23,23 +23,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.sidebar.info(
-    "CSV files should be named **`*-clean.csv`** and live in any "
-    "`data/cleaned/` folder inside the repo."
-)
-
 # ──────────────────────────────────────────────────────────────────────────────
-# Load data
+# 1. Load data from data/cleaned via utils.load_data()
 # ──────────────────────────────────────────────────────────────────────────────
-df = load_data()
-
-if df.empty:
-    st.title("Solar Irradiance Dashboard")
-    st.warning(
-        "❗ No `*-clean.csv` files found under any data/cleaned/ directory.\n\n"
-        "Commit or upload your cleaned datasets and redeploy."
-    )
-    st.stop()
+with st.spinner("Loading cleaned CSVs…"):
+    df = load_data()
 
 # Country filter
 selected = st.sidebar.multiselect(
@@ -53,7 +41,7 @@ if df.empty:
     st.stop()
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Tabs
+# 2. Tabs for EDA & comparison
 # ──────────────────────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["📊 EDA (per country)", "🌍 Cross-country"])
 
