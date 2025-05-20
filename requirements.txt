@@ -2,13 +2,13 @@ streamlit==1.37.0
 numpy==1.26.4
 pandas==2.2.3
 scipy==1.11.4
-matplotlib==3.8.4
+matplotlib==3.7.3      
 seaborn==0.13.2
-windrose==1.6
+windrose==1.9.2
 cycler==0.12.1
 fonttools==4.58.0
 kiwisolver==1.4.8
-pillow==10.3.0
+pillow==10.3.0          
 pyparsing==3.2.3
 python-dateutil==2.9.0.post0
 six==1.17.0
