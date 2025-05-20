@@ -1,11 +1,12 @@
 """
 Utility helpers for the Solar Dashboard
 ---------------------------------------
-Loads cleaned CSVs from data/cleaned, aggregates, and provides cached plot
-functions to keep main.py tidy.
+• Finds every *-clean.csv inside any data/cleaned/ directory
+  beneath the repo or app folder.
+• Caches heavy plots so reruns are fast.
 """
 from pathlib import Path
-from typing import List
+from typing import List, Dict
 
 import streamlit as st
 import numpy as np
@@ -17,35 +18,47 @@ from windrose import WindroseAxes
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Data I/O
+# 1. Data I/O
 # ──────────────────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False, ttl=600)
 def load_data() -> pd.DataFrame:
     """
-    Read benin-clean.csv, sierraleone-clean.csv, togo-clean.csv from
-    data/cleaned/ and concatenate with a Country column.
+    Scan for *.csv whose name ends with '-clean.csv' inside any data/cleaned/
+    folder below the project.  Adds a Country column (title-cased stem before
+    '-clean') and concatenates them.
+
+    Returns
+    -------
+    pd.DataFrame (possibly empty if no files found)
     """
-    # Adjust the path so that .parent.parent leads to your_project/ 
-    # and then /data/cleaned
-    data_path = Path(__file__).parent.parent / "data" / "cleaned"
-    files = {
-        "Benin": data_path / "benin-clean.csv",
-        "Sierra Leone": data_path / "sierraleone-clean.csv",
-        "Togo": data_path / "togo-clean.csv",
-    }
+    root = Path(__file__).resolve().parent.parent  # repo root
+    candidates: List[Path] = []
+
+    # search two typical spots: repo/data/cleaned and anywhere deeper
+    for dirpath in (root / "data" / "cleaned").rglob("*.csv"):
+        candidates.append(dirpath)
+    for dirpath in root.rglob("data/cleaned/*.csv"):
+        if dirpath not in candidates:
+            candidates.append(dirpath)
 
     frames = []
-    for country, path in files.items():
-        # For debugging, you can print: print("[DEBUG] Reading:", path)
-        df = pd.read_csv(path, parse_dates=["Timestamp"], infer_datetime_format=True)
+    for csv in candidates:
+        if not csv.name.endswith("-clean.csv"):
+            continue
+        country = csv.stem.replace("-clean", "").replace("_", " ").title()
+        try:
+            df = pd.read_csv(csv, parse_dates=["Timestamp"], infer_datetime_format=True)
+        except Exception as exc:
+            st.warning(f"⚠️  Skipping {csv.name}: {exc}")
+            continue
         df["Country"] = country
         frames.append(df)
 
-    return pd.concat(frames, ignore_index=True)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Quick EDA helpers
+# 2. Quick EDA helpers
 # ──────────────────────────────────────────────────────────────────────────────
 def summary_stats(df: pd.DataFrame) -> pd.DataFrame:
     numeric = df.select_dtypes(include=[np.number])
@@ -65,7 +78,7 @@ def missing_heatmap(df: pd.DataFrame) -> plt.Figure:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Plot helpers (each cached)
+# 3. Cached plot builders
 # ──────────────────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def time_series(df: pd.DataFrame, metric: str) -> plt.Figure:
@@ -87,7 +100,7 @@ def correlation_heatmap(df: pd.DataFrame, cols: List[str]) -> plt.Figure:
 @st.cache_data(show_spinner=False)
 def scatter_plot(df: pd.DataFrame, x: str, y: str) -> plt.Figure:
     fig, ax = plt.subplots()
-    sns.scatterplot(data=df, x=x, y=y, hue="Country", alpha=0.6, ax=ax)
+    sns.scatterplot(data=df, x=x, y=y, hue="Country", alpha=.6, ax=ax)
     ax.set_title(f"{y} vs {x}")
     return fig
 
@@ -119,7 +132,7 @@ def bubble_chart(df: pd.DataFrame) -> plt.Figure:
         size="RH",
         hue="Country",
         sizes=(20, 400),
-        alpha=0.6,
+        alpha=.6,
         ax=ax,
     )
     ax.set_title("Tamb vs GHI (bubble ~ RH)")
@@ -127,7 +140,17 @@ def bubble_chart(df: pd.DataFrame) -> plt.Figure:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Cross-country stats
+# 4. Cross-country stats
 # ──────────────────────────────────────────────────────────────────────────────
 def compare_stats(df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
-   
+    rows = []
+    for m in metrics:
+        grp = df.groupby("Country")[m].agg(["mean", "median", "std"]).reset_index()
+        grp.insert(1, "Metric", m)
+        rows.append(grp)
+    return pd.concat(rows, ignore_index=True)
+
+
+def one_way_anova(df: pd.DataFrame, metric: str) -> float:
+    groups = [g[metric].dropna() for _, g in df.groupby("Country")]
+    return stats.f_oneway(*groups).pvalue
