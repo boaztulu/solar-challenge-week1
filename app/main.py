@@ -24,22 +24,10 @@ st.set_page_config(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 1. Sidebar – upload cleaned CSVs
+# 1. Load data immediately from data/cleaned
 # ──────────────────────────────────────────────────────────────────────────────
-st.sidebar.header("📥 Upload cleaned CSVs")
-uploader_dict = {
-    "Benin": st.sidebar.file_uploader("Benin CSV", type="csv"),
-    "Sierra Leone": st.sidebar.file_uploader("Sierra Leone CSV", type="csv"),
-    "Togo": st.sidebar.file_uploader("Togo CSV", type="csv"),
-}
-
-if not any(uploader_dict.values()):
-    st.title("Solar Irradiance Dashboard")
-    st.markdown("⬅️ **Upload at least one cleaned CSV in the sidebar to begin.**")
-    st.stop()
-
-with st.spinner("Loading & merging CSVs…"):
-    df = load_data(uploader_dict)
+with st.spinner("Loading cleaned CSVs…"):
+    df = load_data()
 
 # Country filter
 selected = st.sidebar.multiselect(
